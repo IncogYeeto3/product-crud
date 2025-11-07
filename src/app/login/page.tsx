@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { databases, ID } from "@/lib/appwrite";
+import { databases, ID, account } from "@/lib/appwrite";
+import { useRouter } from "next/navigation";
 
 interface Product {
   $id: string;
@@ -16,24 +17,76 @@ export default function ProductsPage() {
   const databaseId = process.env.NEXT_PUBLIC_APPWRITE_DATABASE_ID!;
   const collectionId = process.env.NEXT_PUBLIC_APPWRITE_TABLE_ID!;
 
-  const [products, setProducts] = useState<Product[]>([]);
+
+  const [user, setUser] = useState<any>(null);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  const [formData, setFormData] = useState<Partial<Product>>({
-    name: "",
-    price: 0,
-    description: "",
-    category: "",
-    inStock: true,
-  });
-
+  // existing product state
+  const [formData, setFormData] = useState<any>({});
+  const [products, setProducts] = useState<any[]>([]);
   const [editingId, setEditingId] = useState<string | null>(null);
+
+  const router = useRouter();
+
+ // ✅ Check session on mount
+  useEffect(() => {
+    const checkSession = async () => {
+      try {
+        const current = await account.get();
+        setUser(current);
+      } catch {
+        setUser(null);
+      }
+    };
+    checkSession();
+  }, []);
+
+   // ✅ Regular Appwrite login
+  const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError("");
+    setLoading(true);
+    try {
+      await account.createEmailPasswordSession(email, password);
+      router.push("/dashboard");
+    } catch (err: any) {
+      setError(err.message || "Invalid email or password");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ✅ Auth0 login (via Appwrite OAuth2)
+  async function loginwithAuth0() {
+    try {
+      setLoading(true);
+      await account.createOAuth2Session({
+        provider: "auth0",
+        success: `${process.env.NEXT_PUBLIC_APP_URL}/dashboard`,
+        failure: `${process.env.NEXT_PUBLIC_APP_URL}/login?error=true`,
+        scopes: ["openid", "profile", "email"],
+      });
+    } catch (e: any) {
+      setError(e.message ?? "Auth0 Login Failed");
+      setLoading(false);
+    }
+  }
+
+  // ✅ Logout
+  const handleLogout = async () => {
+    await account.deleteSession("current");
+    setUser(null);
+  };
 
   // Load all products
   useEffect(() => {
     loadProducts();
   }, []);
+
+  
 
   async function loadProducts() {
     try {
@@ -101,6 +154,115 @@ export default function ProductsPage() {
     }
   }
 
+  // ✅ If not logged in → show Auth0 login panel
+  if (!user) {
+    return (
+      <main className="container">
+      <h1>🛍️ Product Management</h1>
+      <h2>Sign In</h2>
+      {error && <p className="error">{error}</p>}
+
+      {/* Regular email/password form */}
+      <form onSubmit={handleLogin} className="form">
+        <label>
+          Email:
+          <input
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            required
+          />
+        </label>
+
+        <label>
+          Password:
+          <input
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            required
+          />
+        </label>
+
+        <button type="submit" disabled={loading}>
+          {loading ? "Signing in..." : "Sign In"}
+        </button>
+      </form>
+
+      <div className="divider">or</div>
+
+      {/* Auth0 login */}
+      <button onClick={loginwithAuth0} disabled={loading} className="auth0-btn">
+        {loading ? "Redirecting..." : "Continue with Auth0"}
+      </button>
+
+      <style jsx>{`
+        .container {
+          max-width: 400px;
+          margin: 80px auto;
+          padding: 30px;
+          background: #fff;
+          border-radius: 10px;
+          box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+          text-align: center;
+          font-family: "Segoe UI", sans-serif;
+        }
+        h1 {
+          color: #2c3e50;
+        }
+        .form {
+          text-align: left;
+          margin-bottom: 20px;
+        }
+        label {
+          display: block;
+          margin-bottom: 12px;
+          color: #333;
+          font-weight: 500;
+        }
+        input {
+          width: 100%;
+          padding: 10px;
+          border: 1px solid #ccc;
+          border-radius: 6px;
+          font-size: 15px;
+        }
+        button {
+          width: 100%;
+          padding: 10px;
+          background: #007bff;
+          color: white;
+          border: none;
+          border-radius: 6px;
+          font-size: 16px;
+          cursor: pointer;
+          transition: background 0.2s;
+        }
+        button:hover {
+          background: #0056b3;
+        }
+        .auth0-btn {
+          background: #eb5424;
+        }
+        .auth0-btn:hover {
+          background: #c63c10;
+        }
+        .divider {
+          margin: 20px 0;
+          color: #888;
+        }
+        .error {
+          color: #b71c1c;
+          background: #ffebee;
+          padding: 8px;
+          border-radius: 6px;
+          margin-bottom: 10px;
+        }
+      `}</style>
+    </main>
+    );
+  }
+
   return (
     <main className="container">
       <h1>🛍️ Product Management</h1>
@@ -159,6 +321,7 @@ export default function ProductsPage() {
         </label>
 
         <button type="submit">{editingId ? "Update" : "Create"}</button>
+        <button type="submit" onClick={handleLogout}>Logout</button>
         {editingId && (
           <button type="button" onClick={handleCancel}>
             Cancel
